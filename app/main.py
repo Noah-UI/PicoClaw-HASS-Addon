@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import http.server
-import json
 import os
-import shlex
 import signal
 import socketserver
 import subprocess
@@ -14,10 +12,6 @@ import sys
 import threading
 import time
 from typing import Optional
-
-
-CHILD_PROCESS: Optional[subprocess.Popen] = None
-CHILD_PROCESS_LOCK = threading.Lock()
 
 
 class HealthHandler(http.server.BaseHTTPRequestHandler):
@@ -30,22 +24,13 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"Not Found")
             return
 
-        with CHILD_PROCESS_LOCK:
-            running = CHILD_PROCESS is not None and CHILD_PROCESS.poll() is None
-
-        status_code = 200 if running else 503
-        payload = {
-            "status": "ok" if running else "degraded",
-            "service": "picoclaw-addon",
-            "process_running": running,
-        }
-
-        self.send_response(status_code)
+        self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps(payload).encode("utf-8"))
+        self.wfile.write(b'{"status":"ok","service":"picoclaw-addon"}')
 
     def log_message(self, _format: str, *_args: object) -> None:
+        # Keep HTTP endpoint quiet in addon logs.
         return
 
 
@@ -59,15 +44,11 @@ def log(level: str, message: str) -> None:
 
 def start_health_server(port: int, stop_event: threading.Event) -> threading.Thread:
     def run_server() -> None:
-        try:
-            with ReusableTCPServer(("0.0.0.0", port), HealthHandler) as server:
-                server.timeout = 1
-                log("INFO", f"Health endpoint listening on 0.0.0.0:{port}")
-                while not stop_event.is_set():
-                    server.handle_request()
-        except OSError as err:
-            log("ERROR", f"Health endpoint konnte nicht gestartet werden: {err}")
-            stop_event.set()
+        with ReusableTCPServer(("0.0.0.0", port), HealthHandler) as server:
+            server.timeout = 1
+            log("INFO", f"Health endpoint listening on 0.0.0.0:{port}")
+            while not stop_event.is_set():
+                server.handle_request()
 
     thread = threading.Thread(target=run_server, name="health-server", daemon=True)
     thread.start()
@@ -97,13 +78,9 @@ def main() -> int:
     signal.signal(signal.SIGINT, handle_signal)
 
     exit_code = 0
-    while not should_exit and not stop_event.is_set():
+    while not should_exit:
         log("INFO", f"Starte Prozess: {command}")
-        process = subprocess.Popen(shlex.split(command))
-
-        with CHILD_PROCESS_LOCK:
-            global CHILD_PROCESS
-            CHILD_PROCESS = process
+        process = subprocess.Popen(command, shell=True)
 
         while process.poll() is None and not should_exit:
             time.sleep(0.5)
@@ -115,9 +92,6 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
-
-        with CHILD_PROCESS_LOCK:
-            CHILD_PROCESS = None
 
         exit_code = process.returncode or 0
         log("WARNING", f"PicoClaw-Prozess beendet mit Exit Code {exit_code}")
