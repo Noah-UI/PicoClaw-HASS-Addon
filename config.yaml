@@ -1,0 +1,32 @@
+name: PicoClaw
+version: "0.2.0"
+slug: picoclaw
+description: "Führt PicoClaw als Home Assistant Supervisor Add-on aus"
+url: "https://github.com/example/PicoClaw-HASS-Addon"
+image: "ghcr.io/example/picoclaw-addon-{arch}"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+startup: services
+boot: auto
+init: false
+hassio_api: false
+host_network: false
+map:
+  - config:rw
+  - addon_config:rw
+options:
+  log_level: info
+  listen_port: 8099
+  picoclaw_command: "picoclaw"
+  auto_restart: true
+schema:
+  log_level: list(trace|debug|info|notice|warning|error|fatal)
+  listen_port: port
+  picoclaw_command: str
+  auto_restart: bool
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: "Health endpoint des Add-ons"
